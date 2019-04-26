@@ -31,11 +31,11 @@ use crate::toxcore::tcp::packet::*;
 use crate::toxcore::time::*;
 
 /// The amount of maximum connections for each friend.
-const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
+pub const MAX_FRIEND_TCP_CONNECTIONS: usize =  6;
 
 /// The amount of recommended connections for each friend.
 ///   NOTE: Must be at most (MAX_FRIEND_TCP_CONNECTIONS / 2).
-const RECOMMENDED_FRIEND_TCP_CONNECTIONS: usize =  MAX_FRIEND_TCP_CONNECTIONS / 2;
+pub const RECOMMENDED_FRIEND_TCP_CONNECTIONS: usize =  MAX_FRIEND_TCP_CONNECTIONS / 2;
 
 /// How many attempts to reconnect to the relay we should make before we
 /// consider this relay unreachable and drop it.
