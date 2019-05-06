@@ -36,6 +36,9 @@ const PACKET_ID_SHARE_RELAYS: u8 = 17;
 /// How often we should send ping packets to a friend.
 const FRIEND_PING_INTERVAL: Duration = Duration::from_secs(8);
 
+/// How often we should send `ShareRelays` packet to a friend.
+const SHARE_RELAYS_INTERVAL: Duration = Duration::from_secs(300);
+
 /// How often the main loop should be called.
 const MAIN_LOOP_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -99,9 +102,11 @@ struct Friend {
     /// Whether we connected to this friend.
     connected: bool,
     /// Time when we sent the last ping packet.
-    ping_sent_time: Instant,
+    ping_sent_time: Option<Instant>,
     /// Time when we received the last ping packet.
-    ping_received_time: Instant,
+    ping_received_time: Option<Instant>,
+    /// Time when we sent the last `ShareRelays` packet.
+    share_relays_time: Option<Instant>,
 }
 
 impl Friend {
@@ -113,8 +118,9 @@ impl Friend {
             dht_pk_time: None,
             saddr_time: None,
             connected: false,
-            ping_sent_time: clock_now(),
-            ping_received_time: clock_now(),
+            ping_sent_time: None,
+            ping_received_time: None,
+            share_relays_time: None,
         }
     }
 }
@@ -179,6 +185,7 @@ impl FriendConnections {
                 })
                 .map_err(|e| Error::new(ErrorKind::Other, e.compat())))
         } else {
+            // TODO: either return error here or don't return error from NetCrypto::kill_connection
             Either::B(future::ok(()))
         }
     }
@@ -297,14 +304,17 @@ impl FriendConnections {
             if friend.connected {
                 // TODO: check ping
 
-                if clock_elapsed(friend.ping_sent_time) >= FRIEND_PING_INTERVAL {
+                if friend.ping_sent_time.map_or(true, |time| clock_elapsed(time) >= FRIEND_PING_INTERVAL) {
                     let future = self.net_crypto.send_lossless(friend.real_pk, vec![PACKET_ID_ALIVE])
                         .map_err(|e| Error::new(ErrorKind::Other, e.compat()));
                     futures.push(Either::A(future));
-                    friend.ping_sent_time = clock_now();
+                    friend.ping_sent_time = Some(clock_now());
                 }
 
-                futures.push(Either::B(self.share_relays(friend.real_pk)));
+                if friend.share_relays_time.map_or(true, |time| clock_elapsed(time) >= SHARE_RELAYS_INTERVAL) {
+                    futures.push(Either::B(self.share_relays(friend.real_pk)));
+                    friend.share_relays_time = Some(clock_now());
+                }
             } else {
                 if friend.dht_pk_time.map_or(false, |time| clock_elapsed(time) >= FRIEND_DHT_TIMEOUT) {
                     if let Some(dht_pk) = friend.dht_pk {
