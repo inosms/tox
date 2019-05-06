@@ -505,6 +505,46 @@ impl NetCrypto {
             return Either::A(future::err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into()));
         }
 
+        let mut connections = self.connections.write();
+
+        let kill_future = if let Some(connection) = connections.get(&cookie.real_pk) {
+            let mut connection = connection.write();
+            if connection.peer_dht_pk != cookie.dht_pk {
+                // We received a handshake packet for an existent connection
+                // from a new address and this packet contains a different DHT
+                // PublicKey. In this case we kill the old connection and create
+                // a new one.
+
+                self.clear_keys_by_addr(&connection);
+                let status_future = self.send_connection_status(&connection, false)
+                    .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into());
+                let kill_future = if connection.is_established() || connection.is_not_confirmed() {
+                    let packet_number = connection.send_array.buffer_end;
+                    Either::A(self.send_data_packet(&mut connection, vec![PACKET_ID_KILL], packet_number)
+                        .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into()))
+                } else {
+                    Either::B(future::ok(()))
+                };
+                Either::A(kill_future.join(status_future).map(|_| ()))
+            } else {
+                // We received a handshake packet for an existent connection
+                // from a new address and this packet contains the same DHT
+                // PublicKey. In this case we reject this packet if we already
+                // received a handshake from the old connection and accept it
+                // otherwise.
+
+                if connection.is_established() || connection.is_not_confirmed() {
+                    return Either::A(future::err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into()));
+                }
+
+                self.clear_keys_by_addr(&connection);
+
+                Either::B(future::ok(()))
+            }
+        } else {
+            Either::B(future::ok(()))
+        };
+
         let mut connection = CryptoConnection::new_not_confirmed(
             &self.real_sk,
             cookie.real_pk,
@@ -519,14 +559,16 @@ impl NetCrypto {
             self.keys_by_addr.write().insert((addr.ip(), addr.port()), cookie.real_pk);
         }
         let connection = Arc::new(RwLock::new(connection));
-        self.connections.write().insert(cookie.real_pk, connection);
+        connections.insert(cookie.real_pk, connection);
 
-        if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
-            Either::B(send_to(dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
+        let dht_pk_future = if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
+            Either::A(send_to(dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into()))
         } else {
-            Either::A(future::ok(()))
-        }
+            Either::B(future::ok(()))
+        };
+
+        Either::B(kill_future.join(dht_pk_future).map(|_| ()))
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
