@@ -2,3 +2,4 @@
 */
 
 pub mod packet;
+pub mod file_transfer;

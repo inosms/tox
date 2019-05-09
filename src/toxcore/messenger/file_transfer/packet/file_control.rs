@@ -15,6 +15,17 @@ pub enum TransferDirection {
     Receive
 }
 
+impl TransferDirection {
+    /// Toggle direction
+    pub fn toggle(self) -> Self {
+        if self == TransferDirection::Send {
+            TransferDirection::Receive
+        } else {
+            TransferDirection::Send
+        }
+    }
+}
+
 impl FromBytes for TransferDirection {
     named!(from_bytes<TransferDirection>,
         switch!(le_u8,
@@ -82,9 +93,12 @@ Length    | Content
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileControl {
-    transfer_direction: TransferDirection,
-    file_id: u8,
-    control_type: ControlType,
+    /// Sending or Receiving.
+    pub transfer_direction: TransferDirection,
+    /// File id of transferring.
+    pub file_id: u8,
+    /// Type of file transferring control.
+    pub control_type: ControlType,
 }
 
 impl FromBytes for FileControl {

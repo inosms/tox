@@ -161,6 +161,17 @@ impl FriendConnections {
         }
     }
 
+    /// Get connection status of a friend
+    pub fn get_connection_status(&self, friend_pk: PublicKey) -> impl Future<Item = bool, Error = Error> + Send {
+        let friend_list = self.friends.read();
+        let friend = friend_list.get(&friend_pk);
+        if let Some(friend) = friend {
+            future::ok(friend.connected)
+        } else {
+            future::err(Error::new(ErrorKind::Other,format!("Unknown PublicKey of friend {:?}", friend_pk)))
+        }
+    }
+
     /// Add a friend we want to be connected to.
     pub fn add_friend(&self, friend_pk: PublicKey) {
         let mut friends = self.friends.write();
