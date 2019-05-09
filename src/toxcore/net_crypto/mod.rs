@@ -225,9 +225,22 @@ impl NetCrypto {
         }
     }
 
-    fn send_connection_status(&self, real_pk: PublicKey, status: bool) -> impl Future<Item = (), Error = mpsc::SendError<(PublicKey, bool)>> {
-        if let Some(ref connection_status_tx) = *self.connection_status_tx.read() {
-            Either::A(send_to(connection_status_tx, (real_pk, status)))
+    fn send_connection_status(&self, connection: &CryptoConnection, status: bool) -> impl Future<Item = (), Error = mpsc::SendError<(PublicKey, bool)>> {
+        if connection.is_established() != status {
+            if let Some(ref connection_status_tx) = *self.connection_status_tx.read() {
+                Either::A(send_to(connection_status_tx, (connection.peer_real_pk, status)))
+            } else {
+                Either::B(future::ok(()))
+            }
+        } else {
+            Either::B(future::ok(()))
+        }
+    }
+
+    fn send_kill_packet(&self, connection: &mut CryptoConnection) -> impl Future<Item = (), Error = SendDataError> + Send {
+        if connection.is_established() || connection.is_not_confirmed() {
+            let packet_number = connection.send_array.buffer_end;
+            Either::A(self.send_data_packet(connection, vec![PACKET_ID_KILL], packet_number))
         } else {
             Either::B(future::ok(()))
         }
@@ -239,19 +252,10 @@ impl NetCrypto {
         if let Some(connection) = self.connections.write().remove(&real_pk) {
             let mut connection = connection.write();
             self.clear_keys_by_addr(&connection);
-            let status_future = if connection.is_established() {
-                Either::A(self.send_connection_status(real_pk, false)
-                    .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus).into()))
-            } else {
-                Either::B(future::ok(()))
-            };
-            let kill_future = if connection.is_established() || connection.is_not_confirmed() {
-                let packet_number = connection.send_array.buffer_end;
-                Either::A(self.send_data_packet(&mut connection, vec![PACKET_ID_KILL], packet_number)
-                    .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into()))
-            } else {
-                Either::B(future::ok(()))
-            };
+            let status_future = self.send_connection_status(&connection, false)
+                .map_err(|e| e.context(KillConnectionErrorKind::SendToConnectionStatus).into());
+            let kill_future = self.send_kill_packet(&mut connection)
+                .map_err(|e| e.context(KillConnectionErrorKind::SendTo).into());
             Either::A(kill_future.join(status_future).map(|_| ()))
         } else {
             Either::B(future::err(KillConnectionErrorKind::NoConnection.into()))
@@ -505,6 +509,41 @@ impl NetCrypto {
             return Either::A(future::err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into()));
         }
 
+        let mut connections = self.connections.write();
+
+        let kill_future = if let Some(connection) = connections.get(&cookie.real_pk) {
+            let mut connection = connection.write();
+            if connection.peer_dht_pk != cookie.dht_pk {
+                // We received a handshake packet for an existent connection
+                // from a new address and this packet contains a different DHT
+                // PublicKey. In this case we kill the old connection and create
+                // a new one.
+
+                self.clear_keys_by_addr(&connection);
+                let status_future = self.send_connection_status(&connection, false)
+                    .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into());
+                let kill_future = self.send_kill_packet(&mut connection)
+                    .map_err(|e| e.context(HandlePacketErrorKind::SendTo).into());
+                Either::A(kill_future.join(status_future).map(|_| ()))
+            } else {
+                // We received a handshake packet for an existent connection
+                // from a new address and this packet contains the same DHT
+                // PublicKey. In this case we reject this packet if we already
+                // received a handshake from the old connection and accept it
+                // otherwise.
+
+                if connection.is_established() || connection.is_not_confirmed() {
+                    return Either::A(future::err(HandlePacketErrorKind::UnexpectedCryptoHandshake.into()));
+                }
+
+                self.clear_keys_by_addr(&connection);
+
+                Either::B(future::ok(()))
+            }
+        } else {
+            Either::B(future::ok(()))
+        };
+
         let mut connection = CryptoConnection::new_not_confirmed(
             &self.real_sk,
             cookie.real_pk,
@@ -519,14 +558,16 @@ impl NetCrypto {
             self.keys_by_addr.write().insert((addr.ip(), addr.port()), cookie.real_pk);
         }
         let connection = Arc::new(RwLock::new(connection));
-        self.connections.write().insert(cookie.real_pk, connection);
+        connections.insert(cookie.real_pk, connection);
 
-        if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
-            Either::B(send_to(dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
+        let dht_pk_future = if let Some(ref dht_pk_tx) = *self.dht_pk_tx.read() {
+            Either::A(send_to(dht_pk_tx, (cookie.real_pk, cookie.dht_pk))
                 .map_err(|e| e.context(HandlePacketErrorKind::SendToDhtpk).into()))
         } else {
-            Either::A(future::ok(()))
-        }
+            Either::B(future::ok(()))
+        };
+
+        Either::B(kill_future.join(dht_pk_future).map(|_| ()))
     }
 
     /// Handle `CryptoHandshake` packet received from UDP socket
@@ -698,13 +739,9 @@ impl NetCrypto {
 
         if packet_id == PACKET_ID_KILL {
             // Kill the connection
-            let status_future = if connection.is_established() {
-                Box::new(self.send_connection_status(connection.peer_real_pk, false)
-                    .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()))
-                    as Box<dyn Future<Item = _, Error = _> + Send>
-            } else {
-                Box::new(future::ok(()))
-            };
+            let status_future = Box::new(self.send_connection_status(&connection, false)
+                .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()))
+                as Box<dyn Future<Item = _, Error = _> + Send>;
             self.connections.write().remove(&connection.peer_real_pk);
             self.clear_keys_by_addr(&connection);
             return status_future;
@@ -715,12 +752,8 @@ impl NetCrypto {
             increment_nonce_number(&mut received_nonce, u64::from(NONCE_DIFF_THRESHOLD));
         }
 
-        let status_future = if !connection.is_established() {
-            Either::A(self.send_connection_status(connection.peer_real_pk, true)
-                .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into()))
-        } else {
-            Either::B(future::ok(()))
-        };
+        let status_future = self.send_connection_status(&connection, true)
+            .map_err(|e| e.context(HandlePacketErrorKind::SendToConnectionStatus).into());
 
         connection.status = ConnectionStatus::Established {
             sent_nonce,
@@ -884,14 +917,13 @@ impl NetCrypto {
                 }
 
                 if connection.is_established() {
-                    let status_future = self.send_connection_status(connection.peer_real_pk, false)
+                    let status_future = self.send_connection_status(&connection, false)
                         .map_err(|e| e.context(SendDataErrorKind::SendToConnectionStatus).into());
                     futures.push(Box::new(status_future));
                 }
 
                 if connection.is_established() || connection.is_not_confirmed() {
-                    let packet_number = connection.send_array.buffer_end;
-                    futures.push(Box::new(self.send_data_packet(&mut connection, vec![PACKET_ID_KILL], packet_number)));
+                    futures.push(Box::new(self.send_kill_packet(&mut connection)));
                 }
 
                 return false;
