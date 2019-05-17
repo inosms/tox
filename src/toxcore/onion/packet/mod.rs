@@ -34,7 +34,10 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packed_node::PackedNode;
 use crate::toxcore::ip_port::*;
 
-use nom::{le_u8, rest};
+use nom::{Needed, Err,
+          number::complete::le_u8,
+          combinator::rest,
+};
 use std::io::{Error, ErrorKind};
 
 /// Size of first `OnionReturn` struct with no inner `OnionReturn`s.
@@ -135,17 +138,20 @@ impl OnionReturn {
                 Error::new(ErrorKind::Other, "OnionReturn decrypt error.")
             })?;
         match OnionReturn::inner_from_bytes(&decrypted) {
-            IResult::Incomplete(e) => {
-                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
+            Err(Err::Incomplete(Needed::Unknown)) => {
                 Err(Error::new(ErrorKind::Other,
-                    format!("Inner onion return deserialize error: {:?}", e)))
+                               format!("Inner onion return deserialize error: Needed::Unknown")))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "Inner onion return deserialize error: {:?}", e);
+            Err(Err::Incomplete(e)) => {
                 Err(Error::new(ErrorKind::Other,
-                    format!("Inner onion return deserialize error: {:?}", e)))
+                               format!("Inner onion return deserialize error: {:?}", e)))
             },
-            IResult::Done(_, inner) => {
+            Err(Err::Error(e)) => {
+                Err(Error::new(ErrorKind::Other,
+                               format!("Inner onion return deserialize error: {:?}", e)))
+            },
+            Err(Err::Failure(e)) => panic!("Inner onion return deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, inner)) => {
                 Ok(inner)
             }
         }

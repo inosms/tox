@@ -4,7 +4,7 @@
 use crate::toxcore::binary_io::*;
 use crate::toxcore::tcp::connection_id::ConnectionId;
 
-use nom::rest;
+use nom::combinator::rest;
 
 /** Sent by client to server.
 The client sends data with `connection_id` and the server

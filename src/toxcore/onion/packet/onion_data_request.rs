@@ -8,7 +8,9 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::onion::packet::MAX_ONION_RESPONSE_PAYLOAD_SIZE;
 
-use nom::rest;
+use nom::{Needed, Err,
+          combinator::rest,
+};
 
 /** It's used to send data requests to dht node using onion paths.
 
@@ -103,15 +105,18 @@ impl InnerOnionDataRequest {
                 GetPayloadError::decrypt()
             })?;
         match OnionDataResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
+            Err(Err::Failure(e)) => panic!("OnionDataResponsePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, inner)) => {
                 Ok(inner)
             }
         }
@@ -145,11 +150,11 @@ pub struct OnionDataRequest {
 
 impl FromBytes for OnionDataRequest {
     named!(from_bytes<OnionDataRequest>, do_parse!(
-        rest_len: verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
-        inner: cond_reduce!(
+        rest_len: verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
+        inner: map_opt!(cond!(
             rest_len >= ONION_RETURN_3_SIZE,
             flat_map!(take!(rest_len - ONION_RETURN_3_SIZE), InnerOnionDataRequest::from_bytes)
-        ) >>
+        ), |inner| inner) >>
         onion_return: call!(OnionReturn::from_bytes) >>
         (OnionDataRequest { inner, onion_return })
     ));

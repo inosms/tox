@@ -1,7 +1,9 @@
 /*! CookieResponse packet
 */
 
-use nom::be_u64;
+use nom::{Needed, Err,
+          number::complete::be_u64,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -77,15 +79,18 @@ impl CookieResponse {
                 GetPayloadError::decrypt()
             })?;
         match CookieResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(error) => {
-                debug!(target: "Dht", "CookieResponsePayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
+            Err(Err::Failure(e)) => panic!("CookieResponsePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -134,7 +139,9 @@ impl ToBytes for CookieResponsePayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::{Needed, ErrorKind};
+    use nom::{Needed,
+              error::ErrorKind
+    };
 
     encode_decode_test!(
         cookie_response_encode_decode,

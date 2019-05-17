@@ -1,6 +1,7 @@
 /*! CryptoHandshake packet
 */
 
+use nom::{Err, Needed};
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::cookie::EncryptedCookie;
@@ -90,15 +91,18 @@ impl CryptoHandshake {
                 GetPayloadError::decrypt()
             })?;
         match CryptoHandshakePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(error) => {
-                debug!(target: "Dht", "CryptoHandshakePayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
+            Err(Err::Failure(e)) => panic!("CryptoHandshakePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -271,7 +275,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret);
         assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(144), payload: invalid_packet.payload });
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(24), payload: invalid_packet.payload });
         // Try short incomplete array
         let invalid_payload = [];
         let invalid_payload_encoded = seal_precomputed(&invalid_payload, &nonce, &shared_secret);

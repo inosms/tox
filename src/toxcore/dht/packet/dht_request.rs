@@ -1,7 +1,10 @@
 /*! DhtRequest packet
 */
 
-use nom::{be_u64, rest};
+use nom::{Needed, Err,
+          number::complete::be_u64,
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -99,16 +102,19 @@ impl DhtRequest {
             })?;
 
         match DhtRequestPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(error) => {
-                debug!(target: "DhtRequest", "DhtRequest deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, packet) => {
-                Ok(packet)
+            Err(Err::Failure(e)) => panic!("DhtRequestPayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
+                Ok(payload)
             }
         }
     }
@@ -299,16 +305,19 @@ impl DhtPkAnnounce {
                 GetPayloadError::decrypt()
             })?;
         match DhtPkAnnouncePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "DhtRequest", "DhtPkAnnouncePayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
-                Ok(inner)
+            Err(Err::Failure(e)) => panic!("DhtPkAnnouncePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
+                Ok(payload)
             }
         }
     }
@@ -345,7 +354,7 @@ impl FromBytes for DhtPkAnnouncePayload {
         no_reply: be_u64 >>
         dht_pk: call!(PublicKey::from_bytes) >>
         nodes: many0!(TcpUdpPackedNode::from_bytes) >>
-        cond_reduce!(nodes.len() <= 4, eof!()) >>
+        cond!(nodes.len() <= 4, eof!()) >>
         (DhtPkAnnouncePayload {
             no_reply,
             dht_pk,
@@ -451,7 +460,9 @@ impl ToBytes for HardeningResponse {
 mod tests {
     use super::*;
 
-    use nom::{Needed, ErrorKind};
+    use nom::{Needed,
+              error::ErrorKind
+    };
 
     use crate::toxcore::ip_port::*;
 
@@ -609,7 +620,7 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&precomputed_key);
         assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(2), payload: invalid_packet.payload });
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(1), payload: invalid_packet.payload });
     }
 
     #[test]

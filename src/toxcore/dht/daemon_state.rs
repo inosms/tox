@@ -15,7 +15,9 @@ use crate::toxcore::dht::kbucket::*;
 use crate::toxcore::dht::ktree::*;
 
 use failure::Fail;
-use nom::{Needed, ErrorKind as NomErrorKind};
+use nom::{Needed, Err,
+          error::ErrorKind as NomErrorKind
+};
 
 error_kind! {
     #[doc = "An error that can occur while serializing/deserializing object."]
@@ -86,11 +88,17 @@ impl DaemonState {
     /// Deserialize DHT close list and then re-setup close list, old means that the format of deserialization is old version
     pub fn deserialize_old(server: &Server, serialized_data: &[u8]) -> impl Future<Item=(), Error=DeserializeError> + Send {
         let nodes = match DhtState::from_bytes(serialized_data) {
-            IResult::Done(_, DhtState(nodes)) => nodes,
-            IResult::Incomplete(needed) =>
-                return Either::A(future::err(DeserializeError::incomplete(needed, serialized_data.to_vec()))),
-            IResult::Error(error) =>
-                return Either::A(future::err(DeserializeError::deserialize(error, serialized_data.to_vec()))),
+            Err(Err::Incomplete(needed)) => {
+                return Either::A(future::err(DeserializeError::incomplete(needed, serialized_data.to_vec())))
+            },
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                return Either::A(future::err(DeserializeError::deserialize(kind, serialized_data.to_vec())))
+            },
+            Err(Err::Failure(e)) => panic!("DhtState deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, DhtState(nodes))) => {
+                nodes
+            }
         };
 
         let nodes_sender = nodes.iter()
@@ -148,7 +156,7 @@ mod tests {
         let serialized_len = serialized_vec.len();
         let res = DaemonState::deserialize_old(&alice, &serialized_vec[..serialized_len - 1]).wait();
         assert!(res.is_err());
-        assert_eq!(*res.err().unwrap().kind(), DeserializeErrorKind::IncompleteData { needed: Needed::Size(55), data: serialized_vec[..serialized_len - 1].to_vec() });
+        assert_eq!(*res.err().unwrap().kind(), DeserializeErrorKind::IncompleteData { needed: Needed::Size(39), data: serialized_vec[..serialized_len - 1].to_vec() });
 
         // test with serialized data corrupted
         let serialized_vec = [42; 10];

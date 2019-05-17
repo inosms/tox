@@ -2,7 +2,10 @@
 */
 
 use byteorder::{ByteOrder, BigEndian};
-use nom::{be_u16, be_u32, rest};
+use nom::{Needed, Err,
+          number::complete::{be_u16, be_u32},
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -40,7 +43,7 @@ pub struct CryptoData {
 
 impl FromBytes for CryptoData {
     named!(from_bytes<CryptoData>, do_parse!(
-        verify!(rest_len, |len| len <= MAX_CRYPTO_PACKET_SIZE) >>
+        verify!(rest_len, |len| *len <= MAX_CRYPTO_PACKET_SIZE) >>
         tag!("\x1b") >>
         nonce_last_bytes: be_u16 >>
         payload: rest >>
@@ -91,15 +94,18 @@ impl CryptoData {
                 GetPayloadError::decrypt()
             })?;
         match CryptoDataPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(error) => {
-                debug!(target: "Dht", "CryptoDataPayload return deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
+            Err(Err::Failure(e)) => panic!("CryptoDataPayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -151,7 +157,7 @@ impl ToBytes for CryptoDataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::Needed;
+    use nom::error::ErrorKind;
 
     encode_decode_test!(
         crypto_data_encode_decode,
@@ -239,6 +245,6 @@ mod tests {
         };
         let decoded_payload = invalid_packet.get_payload(&shared_secret, &nonce);
         assert!(decoded_payload.is_err());
-        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::IncompletePayload { needed: Needed::Size(4), payload: invalid_packet.payload });
+        assert_eq!(*decoded_payload.err().unwrap().kind(), GetPayloadErrorKind::Deserialize { error: ErrorKind::Eof, payload: invalid_packet.payload });
     }
 }

@@ -4,7 +4,9 @@
 use std::fmt;
 
 use failure::{Backtrace, Context, Fail};
-use nom::{Needed, ErrorKind as NomErrorKind};
+use nom::{Needed,
+          error::ErrorKind as NomErrorKind
+};
 
 use std::convert::From;
 use std::io::Error as IoError;

@@ -8,7 +8,9 @@ use crate::toxcore::crypto_core::*;
 use crate::toxcore::dht::packet::*;
 use crate::toxcore::friend_connection::packet::MAX_ONION_CLIENT_DATA_SIZE;
 
-use nom::rest;
+use nom::{Needed, Err,
+          combinator::rest,
+};
 
 /// Maximum size in bytes of Onion Data Response payload
 pub const MAX_ONION_RESPONSE_PAYLOAD_SIZE: usize = MAX_ONION_CLIENT_DATA_SIZE + PUBLICKEYBYTES + MACBYTES;
@@ -41,7 +43,7 @@ pub struct OnionDataResponse {
 
 impl FromBytes for OnionDataResponse {
     named!(from_bytes<OnionDataResponse>, do_parse!(
-        verify!(rest_len, |len| len <= ONION_MAX_PACKET_SIZE) >>
+        verify!(rest_len, |len| *len <= ONION_MAX_PACKET_SIZE) >>
         tag!(&[0x86][..]) >>
         nonce: call!(Nonce::from_bytes) >>
         temporary_pk: call!(PublicKey::from_bytes) >>
@@ -95,15 +97,18 @@ impl OnionDataResponse {
                 GetPayloadError::decrypt()
             })?;
         match OnionDataResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "OnionDataResponsePayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
+            Err(Err::Failure(e)) => panic!("OnionDataResponsePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, inner)) => {
                 Ok(inner)
             }
         }
@@ -181,15 +186,18 @@ impl OnionDataResponsePayload {
                 GetPayloadError::decrypt()
             })?;
         match OnionDataResponseInnerPayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "Onion", "OnionDataResponseInnerPayload deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(e) => {
-                debug!(target: "Onion", "OnionDataResponseInnerPayload deserialize error: {:?}", e);
-                Err(GetPayloadError::deserialize(e, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, inner) => {
+            Err(Err::Failure(e)) => panic!("OnionDataResponseInnerPayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, inner)) => {
                 Ok(inner)
             }
         }

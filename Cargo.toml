@@ -34,7 +34,7 @@ byteorder = "1"
 futures = "0.1"
 log = "0.4"
 sodiumoxide = "0.2.2"
-nom = "3.2"
+nom = { git = "https://github.com/Geal/nom.git" }
 cookie-factory = "0.2"
 get_if_addrs = "0.5"
 parking_lot = "0.7"

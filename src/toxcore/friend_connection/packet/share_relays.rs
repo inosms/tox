@@ -25,7 +25,7 @@ impl FromBytes for ShareRelays {
     named!(from_bytes<ShareRelays>, do_parse!(
         tag!("\x11") >>
         relays: many0!(PackedNode::from_tcp_bytes) >>
-        verify!(value!(relays.len()), |len| len <= 3) >>
+        verify!(value!(relays.len()), |len| *len <= 3) >>
         (ShareRelays {
             relays,
         })

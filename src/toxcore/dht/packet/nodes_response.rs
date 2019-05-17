@@ -1,7 +1,10 @@
 /*! NodesResponse packet
 */
 
-use nom::{le_u8, be_u64, rest};
+use nom::{Needed, Err,
+          number::complete::{le_u8, be_u64},
+          combinator::rest,
+};
 
 use crate::toxcore::binary_io::*;
 use crate::toxcore::crypto_core::*;
@@ -88,15 +91,18 @@ impl NodesResponse {
             })?;
 
         match NodesResponsePayload::from_bytes(&decrypted) {
-            IResult::Incomplete(needed) => {
-                debug!(target: "NodesResponse", "NodesResponsePayload deserialize error: {:?}", needed);
+            Err(Err::Incomplete(Needed::Unknown)) => {
+                Err(GetPayloadError::incomplete(Needed::Unknown, self.payload.to_vec()))
+            },
+            Err(Err::Incomplete(needed)) => {
                 Err(GetPayloadError::incomplete(needed, self.payload.to_vec()))
             },
-            IResult::Error(error) => {
-                debug!(target: "NodesResponse", "PingRequestPayload deserialize error: {:?}", error);
-                Err(GetPayloadError::deserialize(error, self.payload.to_vec()))
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(GetPayloadError::deserialize(kind, self.payload.to_vec()))
             },
-            IResult::Done(_, payload) => {
+            Err(Err::Failure(e)) => panic!("NodesResponsePayload deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, payload)) => {
                 Ok(payload)
             }
         }
@@ -145,10 +151,10 @@ impl ToBytes for NodesResponsePayload {
 impl FromBytes for NodesResponsePayload {
     named!(from_bytes<NodesResponsePayload>, do_parse!(
         nodes_number: le_u8 >>
-        nodes: cond_reduce!(
+        nodes: map_opt!(cond!(
             nodes_number <= 4,
             count!(PackedNode::from_bytes, nodes_number as usize)
-        ) >>
+        ), |nodes| nodes) >>
         id: be_u64 >>
         eof!() >>
         (NodesResponsePayload { nodes, id })

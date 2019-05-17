@@ -10,7 +10,9 @@ use crate::toxcore::stats::*;
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use failure::Fail;
-use nom::{ErrorKind, Needed};
+use nom::{error::ErrorKind, Err,
+          Needed
+};
 use tokio::codec::{Decoder, Encoder};
 
 /// A serialized `Packet` should be not longer than 2048 bytes.
@@ -132,9 +134,13 @@ impl Decoder for DhtCodec {
         }
 
         match Packet::from_bytes(buf) {
-            IResult::Incomplete(needed) => Err(DecodeError::incomplete_packet(needed, buf.to_vec())),
-            IResult::Error(error) => Err(DecodeError::deserialize(error, buf.to_vec())),
-            IResult::Done(_, packet) => {
+            Err(Err::Incomplete(needed)) => Err(DecodeError::incomplete_packet(needed, buf.to_vec())),
+            Err(Err::Error(error)) => {
+                let (_, kind) = error;
+                Err(DecodeError::deserialize(kind, buf.to_vec()))
+            },
+            Err(Err::Failure(e)) => panic!("Packet deserialize failed with unrecoverable error: {:?}", e),
+            Ok((_, packet)) => {
                 // Add 1 to incoming counter
                 self.stats.counters.increase_incoming();
 
