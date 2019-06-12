@@ -964,7 +964,10 @@ mod tests {
         let onion_node = OnionNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:12345".parse().unwrap(),
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             ping_id: None,
             data_pk: None,
             unsuccessful_pings: 0,
@@ -982,7 +985,10 @@ mod tests {
         let announce_request_data = AnnounceRequestData {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:12345".parse().unwrap(),
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             friend_pk: None,
         };
 
@@ -1036,7 +1042,10 @@ mod tests {
         let onion_node = OnionNode {
             pk,
             saddr,
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             ping_id: None,
             data_pk: None,
             unsuccessful_pings: 0,
@@ -1058,7 +1067,10 @@ mod tests {
         let mut onion_node = OnionNode {
             pk,
             saddr: "127.0.0.1:12345".parse().unwrap(),
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             ping_id: None,
             data_pk: None,
             unsuccessful_pings: 1,
@@ -1069,7 +1081,10 @@ mod tests {
         };
 
         let saddr = "127.0.0.1:12346".parse().unwrap();
-        let path_id = [gen_keypair().0, gen_keypair().0, gen_keypair().0];
+        let path_id = OnionPathId {
+            keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            tcp: false,
+        };
         let ping_id = sha256::hash(&[1, 2, 3]);
         let data_pk = gen_keypair().0;
         let new_now = now + Duration::from_secs(1);
@@ -1110,7 +1125,10 @@ mod tests {
         let mut onion_node = OnionNode {
             pk: gen_keypair().0,
             saddr: "127.0.0.1:12345".parse().unwrap(),
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             ping_id: None,
             data_pk: None,
             unsuccessful_pings: 0,
@@ -1563,7 +1581,10 @@ mod tests {
         let request_data = AnnounceRequestData {
             pk: sender_pk,
             saddr,
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             friend_pk: Some(friend_pk),
         };
         let request_id = state.announce_requests.new_ping_id(request_data);
@@ -1604,7 +1625,10 @@ mod tests {
         let request_data = AnnounceRequestData {
             pk: sender_pk,
             saddr,
-            path_id: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+            path_id: OnionPathId {
+                keys: [gen_keypair().0, gen_keypair().0, gen_keypair().0],
+                tcp: false,
+            },
             friend_pk: Some(friend_pk),
         };
         let request_id = state.announce_requests.new_ping_id(request_data);
